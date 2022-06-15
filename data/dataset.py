@@ -23,23 +23,25 @@ class PandaDataset(Dataset):
         self.num_scenes = num_scenes
         self.seq_no = -1
         self.len = self.num_sequences * self.num_scenes
-        self.to_torch = to_tensor
+        self.to_tensor = to_tensor
 
     def __getitem__(self, idx):
         seq_no = math.floor(idx/self.num_scenes)
         self.scene_no = idx % self.num_scenes
         if self.seq_no != seq_no:
             if self.seq_no != -1:
-                del self.seq
+                del self.lidar
+                del self.semseg
                 gc.collect()
             self.seq_no = seq_no
             self.seq = self.dataset[self.sequences[self.seq_no]].load_lidar()
+            self.seq.load_semseg()
             self.lidar = self.seq.lidar
             self.semseg = self.seq.semseg
         self.sc_semseg = self.semseg.data[self.scene_no]
         self.sc_ptcloud = self.lidar.data[self.scene_no]
         if self.to_tensor:
-            # todo return the tensor instrad
+            # todo return the tensor instead
             return self.sc_ptcloud, self.sc_semseg
         else:
             return self.sc_ptcloud, self.sc_semseg
