@@ -24,9 +24,10 @@ class PandaDataset(Dataset):
         self.seq_no = -1
         self.len = self.num_sequences * self.num_scenes
         self.to_tensor = to_tensor
+        self.type = type
 
     def __getitem__(self, idx):
-        seq_no = math.floor(idx/self.num_scenes)
+        seq_no = math.floor(idx / self.num_scenes)
         self.scene_no = idx % self.num_scenes
         if self.seq_no != seq_no:
             if self.seq_no != -1:
@@ -41,8 +42,10 @@ class PandaDataset(Dataset):
         self.sc_semseg = self.semseg.data[self.scene_no]
         self.sc_ptcloud = self.lidar.data[self.scene_no]
         if self.to_tensor:
-            # todo return the tensor instead
-            return self.sc_ptcloud, self.sc_semseg
+
+            self.sc_ptcloud_tensor = torch.tensor(self.sc_ptcloud.values)
+            self.sc_semseg_tensor = torch.tensor(self.sc_semseg.values)
+            return self.sc_ptcloud_tensor, self.sc_semseg
         else:
             return self.sc_ptcloud, self.sc_semseg
 
@@ -50,7 +53,17 @@ class PandaDataset(Dataset):
         return self.len
 
 
+def get_data_loader(dir, batch, num_scenes=80, to_tensor=True):
+    pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
+    return DataLoader(pdset, num_workers=4, batch_size=batch)
+
+
 if __name__ == '__main__':
-    pdset = PandaDataset(r'C:\Users\mahes\Desktop\Projects\Segmentation\pandaset-devkit\data\PandaSet', 80)
-    for i in range(len(pdset)):
-        pt_cloud, label = pdset[i]
+    train_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8, 80, True)
+    valid_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\test', 8, 80, True)
+    for i_batch, sample_batched in enumerate(train_dl):
+        print(i_batch)
+    #
+    # pdset = PandaDataset(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8)
+    # for i in range(len(pdset)):
+    #     pt_cloud, label = pdset[i]
