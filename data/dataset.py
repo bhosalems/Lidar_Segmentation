@@ -9,6 +9,9 @@ from torchvision import transforms, utils
 import pandaset
 import math
 import gc
+import random
+from config.config import *
+from torch.nn.utils.rnn import pad_sequence
 
 
 class PandaDataset(Dataset):
@@ -42,10 +45,9 @@ class PandaDataset(Dataset):
         self.sc_semseg = self.semseg.data[self.scene_no]
         self.sc_ptcloud = self.lidar.data[self.scene_no]
         if self.to_tensor:
-
             self.sc_ptcloud_tensor = torch.tensor(self.sc_ptcloud.values)
             self.sc_semseg_tensor = torch.tensor(self.sc_semseg.values)
-            return self.sc_ptcloud_tensor, self.sc_semseg
+            return self.sc_ptcloud_tensor, self.sc_semseg_tensor
         else:
             return self.sc_ptcloud, self.sc_semseg
 
@@ -55,12 +57,12 @@ class PandaDataset(Dataset):
 
 def get_data_loader(dir, batch, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
-    return DataLoader(pdset, num_workers=4, batch_size=batch)
+    return DataLoader(pdset, batch_size=batch, collate_fn=None)
 
 
 if __name__ == '__main__':
-    train_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8, 80, True)
-    valid_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\test', 8, 80, True)
+    train_dl = get_data_loader(PATH_TRAIN, 8, 80, True)
+    valid_dl = get_data_loader(PATH_VALID, 8, 80, True)
     for i_batch, sample_batched in enumerate(train_dl):
         print(i_batch)
     #
