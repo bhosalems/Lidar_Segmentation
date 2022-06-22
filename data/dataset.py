@@ -1,14 +1,11 @@
 from __future__ import print_function, division
-import os
 import torch
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
 import pandaset
 import math
 import gc
+from Lidar_Segmentation.config.config import *
+import random
 
 
 class PandaDataset(Dataset):
@@ -45,7 +42,7 @@ class PandaDataset(Dataset):
 
             self.sc_ptcloud_tensor = torch.tensor(self.sc_ptcloud.values)
             self.sc_semseg_tensor = torch.tensor(self.sc_semseg.values)
-            return self.sc_ptcloud_tensor, self.sc_semseg
+            return self.sc_ptcloud_tensor, self.sc_semseg_tensor
         else:
             return self.sc_ptcloud, self.sc_semseg
 
@@ -53,16 +50,29 @@ class PandaDataset(Dataset):
         return self.len
 
 
+def pandaset_collate(batch):
+    pt_cld = []
+    labels = []
+    for t in batch:
+        idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
+        pt_cld.append(torch.tensor(t[0].iloc[idx].values))
+        labels.append(torch.tensor(t[1].iloc[idx].values))
+    f_pt_cld = torch.stack(pt_cld)
+    f_labels = torch.stack(labels)
+    return f_pt_cld, f_labels
+
+
 def get_data_loader(dir, batch, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
-    return DataLoader(pdset, num_workers=4, batch_size=batch)
+    return DataLoader(pdset, batch_size=batch, collate_fn=pandaset_collate)
 
 
 if __name__ == '__main__':
-    train_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8, 80, True)
-    valid_dl = get_data_loader(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\test', 8, 80, True)
+    train_dl = get_data_loader(PATH_TRAIN, 8, 80, False)
+    valid_dl = get_data_loader(PATH_VALID, 8, 80, False)
     for i_batch, sample_batched in enumerate(train_dl):
         print(i_batch)
+        print(sample_batched)
     #
     # pdset = PandaDataset(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8)
     # for i in range(len(pdset)):
