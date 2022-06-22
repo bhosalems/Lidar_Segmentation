@@ -1,17 +1,11 @@
 from __future__ import print_function, division
-import os
 import torch
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, utils
 import pandaset
 import math
 import gc
+from Lidar_Segmentation.config.config import *
 import random
-from config.config import *
-from torch.nn.utils.rnn import pad_sequence
 
 
 class PandaDataset(Dataset):
@@ -55,16 +49,29 @@ class PandaDataset(Dataset):
         return self.len
 
 
+def pandaset_collate(batch):
+    pt_cld = []
+    labels = []
+    for t in batch:
+        idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
+        pt_cld.append(torch.tensor(t[0].iloc[idx].values))
+        labels.append(torch.tensor(t[1].iloc[idx].values))
+    f_pt_cld = torch.stack(pt_cld)
+    f_labels = torch.stack(labels)
+    return f_pt_cld, f_labels
+
+
 def get_data_loader(dir, batch, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
-    return DataLoader(pdset, batch_size=batch, collate_fn=None)
+    return DataLoader(pdset, batch_size=batch, collate_fn=pandaset_collate)
 
 
 if __name__ == '__main__':
-    train_dl = get_data_loader(PATH_TRAIN, 8, 80, True)
-    valid_dl = get_data_loader(PATH_VALID, 8, 80, True)
+    train_dl = get_data_loader(PATH_TRAIN, 8, 80, False)
+    valid_dl = get_data_loader(PATH_VALID, 8, 80, False)
     for i_batch, sample_batched in enumerate(train_dl):
         print(i_batch)
+        print(sample_batched)
     #
     # pdset = PandaDataset(r'C:\Users\akumar58\Desktop\instance segmentation\pandaset_0\train', 8)
     # for i in range(len(pdset)):
