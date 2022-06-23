@@ -50,9 +50,10 @@ class PandaDataset(Dataset):
         return self.len
 
 
-def pandaset_collate(batch):
+def pandaset_collate(batch, args):
     pt_cld = []
     labels = []
+    MX_SZ = args['MX_SZ']
     for t in batch:
         idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
         pt_cld.append(torch.tensor(t[0].iloc[idx].values))
@@ -62,14 +63,15 @@ def pandaset_collate(batch):
     return f_pt_cld, f_labels
 
 
-def get_data_loader(dir, batch, num_scenes=80, to_tensor=True):
+def get_data_loader(dir, batch, MX_SZ, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
-    return DataLoader(pdset, batch_size=batch, collate_fn=pandaset_collate)
+    arg = {'MX_SZ': MX_SZ}
+    return DataLoader(pdset, batch_size=batch, collate_fn=lambda b: pandaset_collate(b, arg))
 
 
 if __name__ == '__main__':
-    train_dl = get_data_loader(PATH_TRAIN, 8, 80, False)
-    valid_dl = get_data_loader(PATH_VALID, 8, 80, False)
+    train_dl = get_data_loader(PATH_TRAIN, 8, 16000, 80, False)
+    valid_dl = get_data_loader(PATH_VALID, 8, 16000, 80, False)
     for i_batch, sample_batched in enumerate(train_dl):
         print(i_batch)
         print(sample_batched)
