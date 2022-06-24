@@ -53,8 +53,9 @@ class PandaDataset(Dataset):
         return self.len
 
 
+
 # pandaset_collate is used to return tensor data,
-# which are created by  stacking randomly sampled 16000 point cloud and semseg data 
+# which are created by  stacking randomly sampled 16000 point cloud and semseg data
 def pandaset_collate(batch, args):
     pt_cld = []
     labels = []
