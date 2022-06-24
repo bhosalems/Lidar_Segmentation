@@ -24,9 +24,9 @@ class PandaDataset(Dataset):
         self.type = type
 
     def __getitem__(self, idx):
-        #loading 8 scenes per sequence from train/valid dataset
-        #using load_lidar to load all data for a scene , then extracting  point cloud and semseg data from it
-        #return to_tensor is optional , as we are creating tensors in pandaset_collate
+        # loading 8 scenes per sequence from train/valid dataset
+        # using load_lidar to load all data for a scene , then extracting  point cloud and semseg data from it
+        # return to_tensor is optional , as we are creating tensors in pandaset_collate
 
         seq_no = math.floor(idx / self.num_scenes)
         self.scene_no = idx % self.num_scenes
@@ -52,7 +52,8 @@ class PandaDataset(Dataset):
     def __len__(self):
         return self.len
 
-#pandaset_collate is used to return tensor data,
+
+# pandaset_collate is used to return tensor data,
 # which are created by  stacking randomly sampled 16000 point cloud and semseg data 
 def pandaset_collate(batch, args):
     pt_cld = []
@@ -66,13 +67,15 @@ def pandaset_collate(batch, args):
     f_labels = torch.stack(labels)
     return f_pt_cld, f_labels
 
-#passing  pandaset_collate function to data_loader and returning data_loader object
+
+# passing  pandaset_collate function to data_loader and returning data_loader object
 def get_data_loader(dir, batch, MX_SZ, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
     arg = {'MX_SZ': MX_SZ}
     return DataLoader(pdset, batch_size=batch, collate_fn=lambda b: pandaset_collate(b, arg))
 
-#data_loader creates index for input data
+
+# data_loader creates index for input data
 if __name__ == '__main__':
     train_dl = get_data_loader(PATH_TRAIN, 8, 16000, 80, False)
     valid_dl = get_data_loader(PATH_VALID, 8, 16000, 80, False)
