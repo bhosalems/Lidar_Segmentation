@@ -1,13 +1,26 @@
 import torch.nn as nn
-
+import sklearn
+from sklearn.neighbors import NearestNeighbors
 
 class LocSE(nn.Module):
-    def __init__(self, args):
-        
-        self.mlp = nn.Linear(args.input_channel, args.input_channels)
+    def __init__(self, k):
+        self.k = k
+        self.knn = NearestNeighbors(k)
 
-    def forward(self, x):
-        o = self.mlp(x)
+    def forward(self, coords, features):
+
+        self.knn.fit(coords)
+        knn_dist, knn_points = self.knn.kneighbors(coords,return_distance=True)
+
+        r = []
+        for i in range(knn_points.shape[0]):
+            for j in range(knn_points[i].shape[0]):
+                pos_enc = coords[i].tolist() + coords[knn_points[i][j]].tolist() + \
+                          (coords[i] - coords[knn_points[i][j]]).tolist() + [knn_dist[i][j]]
+                r.append(pos_enc)
+        #send r to shared MLP
+        #append its output with features
+        return
 
 
 # Shared MLP is implemented with 2D convolutions with kernel size 1*1. In shared MLP weights from all the input to the
