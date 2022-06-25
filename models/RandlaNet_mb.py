@@ -20,7 +20,6 @@ class LocSE(nn.Module):
                 r.append(pos_enc)
         #send r to shared MLP
         #append its output with features
-                m
         return
 
 
