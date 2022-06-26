@@ -5,10 +5,21 @@ from sklearn.neighbors import NearestNeighbors
 class LocSE(nn.Module):
     def __init__(self, k):
         self.k = k
-        self.knn = NearestNeighbors(k)
+        self.knn = NearestNeighbors(n_neighbors=k)
+        self.sharedmlp = Shared_MLP(10, kernel_sz=1, )
 
     def forward(self, coords, features):
+        """
+        returns Local Spatial encoding of point cloud such that corresponding features are aware of their
+        relative spatial locations
 
+        Args:
+            coords: x y z co-ordinates for input data, b_size*N*3
+            features: Output from sharedMLP is given as features b_size*N*d
+
+        Returns: returns a tensor of size #Todo
+
+        """
         self.knn.fit(coords)
         knn_dist, knn_points = self.knn.kneighbors(coords,return_distance=True)
 
@@ -18,9 +29,10 @@ class LocSE(nn.Module):
                 pos_enc = coords[i].tolist() + coords[knn_points[i][j]].tolist() + \
                           (coords[i] - coords[knn_points[i][j]]).tolist() + [knn_dist[i][j]]
                 r.append(pos_enc)
-        #send r to shared MLP
-        #append its output with features
-        return
+
+        r = self.sharedmlp(r)
+        f_encoded = r.append(features)
+        return f_encoded
 
 
 # Shared MLP is implemented with 2D convolutions with kernel size 1*1. In shared MLP weights from all the input to the
