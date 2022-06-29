@@ -1,12 +1,14 @@
 import torch.nn as nn
+import torch
 import sklearn
 from sklearn.neighbors import NearestNeighbors
 
+
 class LocSE(nn.Module):
-    def __init__(self, k):
+    def __init__(self, k, d_out):
         self.k = k
         self.knn = NearestNeighbors(n_neighbors=k)
-        self.sharedmlp = Shared_MLP(10, kernel_sz=1, )
+        self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1)
 
     def forward(self, coords, features):
         """
@@ -62,3 +64,11 @@ class Shared_MLP(nn.Module):
         if self.activation:
             x = self.activation(x)
         return x
+
+
+if __name__ == '__main__':
+    import time
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    d_in = 7
+    cloud = 1000*torch.randn(1, 2**16, d_in).to(device)
