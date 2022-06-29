@@ -1,19 +1,17 @@
 import torch.nn as nn
 import torch
-import sklearn
-# try:
-#     from torch_points import knn
-# except (ModuleNotFoundError, ImportError):
-#     from torch_points_kernels import knn
 
-from sklearn.neighbors import KNeighborsClassifier as knn
+try:
+    from torch_points import knn
+except (ModuleNotFoundError, ImportError):
+    from torch_points_kernels import knn
 
 class LocSE(nn.Module):
-    def __init__(self, k, d_out, device):
-        super(LocSE, self).__init__()
+    def __init__(self, k, d_out):
         self.k = k
+        self.knn = NearestNeighbors(n_neighbors=k)
         self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1)
-        self.device = device
+
     def forward(self, coords, features):
         """
         returns Local Spatial encoding of point cloud such that corresponding features are aware of their
@@ -77,6 +75,7 @@ class Shared_MLP(nn.Module):
         if self.activation:
             x = self.activation(x)
         return x
+
 if __name__ == '__main__':
     import time
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
