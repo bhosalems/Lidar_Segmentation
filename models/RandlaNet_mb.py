@@ -8,8 +8,8 @@ except (ModuleNotFoundError, ImportError):
 
 class LocSE(nn.Module):
     def __init__(self, k, d_out):
+        super(LocSE, self).__init__()
         self.k = k
-        self.knn = NearestNeighbors(n_neighbors=k)
         self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1)
 
     def forward(self, coords, features):
@@ -36,9 +36,10 @@ class LocSE(nn.Module):
         return torch.concat(mlp_sp_enc,features.expand(B, -1, N, K),dim=-3)
 
 
-    def Attention_pooling(self,locse_data):
-        # initialization
-        return
+class Attention_pooling(nn.Module):
+    def __init__(self):
+        super(Attention_pooling, self).__init__()
+
     def forward(self):
         #computing attention score :
         # sharedMLP
