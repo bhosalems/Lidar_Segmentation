@@ -1,6 +1,5 @@
 import torch.nn as nn
 import torch
-import sklearn
 
 try:
     from torch_points import knn
@@ -35,6 +34,18 @@ class LocSE(nn.Module):
                                    knn_dist.unsqueeze(-3)),dim=-3).to_device(self.device)
         mlp_sp_enc = self.sharedmlp(spatial_enc)
         return torch.concat(mlp_sp_enc,features.expand(B, -1, N, K),dim=-3)
+
+
+    def Attention_pooling(self,locse_data):
+        # initialization
+        return
+    def forward(self):
+        #computing attention score :
+        # sharedMLP
+        # softmax
+
+        #weighted summation
+        return
 
 
 # Shared MLP is implemented with 2D convolutions with kernel size 1*1. In shared MLP weights from all the input to the
