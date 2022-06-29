@@ -8,9 +8,11 @@ except (ModuleNotFoundError, ImportError):
     from torch_points_kernels import knn
 
 class LocSE(nn.Module):
-    def __init__(self, k, d_out):
+    def __init__(self, k, d_out, device):
+        super(LocSE, self).__init__()
         self.k = k
-        self.knn = NearestNeighbors(n_neighbors=k)
+        self.dout = d_out
+        self.device = device
         self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1)
 
     def forward(self, coords, features):
@@ -26,13 +28,13 @@ class LocSE(nn.Module):
         knn_points, knn_dist = knn_output
         B, N, K = knn_points.size()
         extended_idx = knn_points.unsqueeze(1).expand(B, 3, N, K)
-        extended_coords = knn_points.transpose(-2, -1).unsqueeze(-1).expand(B, 3, N, K)
+        extended_coords = coords.transpose(-2, -1).unsqueeze(-1).expand(B, 3, N, K)
         neighbors = torch.gather(extended_coords, 2, extended_idx)
 
         spatial_enc = torch.concat((extended_coords,
                                    neighbors,
                                    extended_coords-neighbors,
-                                   knn_dist.unsqueeze(-3)),dim=-3).to_device(self.device)
+                                   knn_dist.unsqueeze(-3)),dim=-3).to(self.device)
         mlp_sp_enc = self.sharedmlp(spatial_enc)
         return torch.concat(mlp_sp_enc,features.expand(B, -1, N, K),dim=-3)
 
@@ -69,6 +71,6 @@ if __name__ == '__main__':
     import time
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     d_in = 7
-    cloud = 1000*torch.randn(1, 2**16, d_in).to(device)
-    lse = LocSE(16, 20)
+    cloud = 1000*torch.randn(1, 2**16, d_in).to('cpu')
+    lse = LocSE(16, 20, 'cpu')
     lse(cloud[..., :3], cloud[..., 3:7] )
