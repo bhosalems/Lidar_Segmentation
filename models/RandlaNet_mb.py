@@ -1,3 +1,4 @@
+from modulefinder import Module
 import torch.nn as nn
 import torch
 
@@ -7,10 +8,14 @@ except (ModuleNotFoundError, ImportError):
     from torch_points_kernels import knn
 
 class LocSE(nn.Module):
-    def __init__(self, k, d_out):
+
+    def __init__(self, k, d_out, device):
         super(LocSE, self).__init__()
         self.k = k
-        self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1)
+        self.dout = d_out
+        self.device = device
+        self.sharedmlp = Shared_MLP(in_channels=10, out_channels=d_out, kernel_sz=1, batch_norm=True, activation_fn=nn.ReLU())
+
 
     def forward(self, coords, features):
         """
@@ -25,28 +30,33 @@ class LocSE(nn.Module):
         knn_points, knn_dist = knn_output
         B, N, K = knn_points.size()
         extended_idx = knn_points.unsqueeze(1).expand(B, 3, N, K)
-        extended_coords = knn_points.transpose(-2, -1).unsqueeze(-1).expand(B, 3, N, K)
+        extended_coords = coords.transpose(-2, -1).unsqueeze(-1).expand(B, 3, N, K)
         neighbors = torch.gather(extended_coords, 2, extended_idx)
 
         spatial_enc = torch.concat((extended_coords,
                                    neighbors,
                                    extended_coords-neighbors,
-                                   knn_dist.unsqueeze(-3)),dim=-3).to_device(self.device)
+                                   knn_dist.unsqueeze(-3)), dim=-3).to(self.device)
         mlp_sp_enc = self.sharedmlp(spatial_enc)
-        return torch.concat(mlp_sp_enc,features.expand(B, -1, N, K),dim=-3)
+        return torch.cat((mlp_sp_enc, features.expand(B, -1, N, K)), dim=-3)
 
 
 class Attention_pooling(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels, out_channels):
         super(Attention_pooling, self).__init__()
-
-    def forward(self):
+        self.linear = nn.Linear(in_features=in_channels, out_features=in_channels, bias=False)
+        self.sharedmlp = Shared_MLP(in_channels=in_channels, out_channels=out_channels, kernel_sz=1, 
+                                    batch_norm=True, activation_fn=nn.ReLU())
+        self.softmax = nn.Softmax(dim=-2)
+    
+    def forward(self, features_enc):
         #computing attention score :
-        # sharedMLP
-        # softmax
-
-        #weighted summation
-        return
+        score = self.softmax(self.linear(features_enc.permute(0, 2, 3, 1))).permute(0, 3, 1, 2)
+        # out = torch.matmul(features_enc, score.permute(0, 1, 3, 2))
+        # torch.save(out, 'ours.pt')
+        out = torch.sum(score * features_enc, dim=-1, keepdim=True)
+        out = self.sharedmlp(out)
+        return out
 
 
 # Shared MLP is implemented with 2D convolutions with kernel size 1*1. In shared MLP weights from all the input to the
@@ -54,7 +64,7 @@ class Attention_pooling(nn.Module):
 # information of neighbors (and in most cases on unordered point-clouds there's no structure to the data and you can not
 # naively convovle) we take the 1*1 kernel size which acts as a node in linear layer.
 class Shared_MLP(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_sz, stride=1, batch_norm=False, activation=None):
+    def __init__(self, in_channels, out_channels, kernel_sz, stride=1, batch_norm=False, activation_fn=None):
         super(Shared_MLP, self).__init__()
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_sz,
                               stride=stride)
@@ -62,7 +72,7 @@ class Shared_MLP(nn.Module):
             self.bn = nn.BatchNorm2d(out_channels)
         else:
             self.bn = None
-        self.activation = activation
+        self.activation_fn = activation_fn
     def forward(self, x):
         """
         Input is the input tensor (could be either intermediate features of the point cloud or the point features at the
@@ -73,14 +83,20 @@ class Shared_MLP(nn.Module):
         x = self.conv(x)
         if self.bn:
             x = self.bn(x)
-        if self.activation:
-            x = self.activation(x)
+        if self.activation_fn:
+            x = self.activation_fn(x)
         return x
 
 if __name__ == '__main__':
     import time
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     d_in = 7
-    cloud = 1000*torch.randn(1, 2**16, d_in).to(device)
-    lse = LocSE(16, 20)
-    lse(cloud[..., :3], cloud[..., 3:7] )
+    torch.manual_seed(42)
+    cloud = 1000*torch.randn(1, 2**16, d_in).to('cpu')
+    d = 4
+    lse = LocSE(16, d, 'cpu')
+    features = cloud[..., 3:7].unsqueeze(-1).permute(0, 2, 1, 3)
+    ans = lse(cloud[..., :3], features)
+    attn = Attention_pooling(in_channels=2*d, out_channels=2*d)
+    ans = attn(ans)
+    print("x")
