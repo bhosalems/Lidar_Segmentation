@@ -4,16 +4,16 @@ from unicodedata import decimal
 import torch.nn as nn
 import torch
 
-random_seed = 1 # or any of your favorite number 
-torch.manual_seed(random_seed)
-torch.cuda.manual_seed(random_seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-import numpy as np
-np.random.seed(random_seed)
-import random
-random.seed(random_seed)
-torch.use_deterministic_algorithms(True)
+# random_seed = 1 # or any of your favorite number 
+# torch.manual_seed(random_seed)
+# torch.cuda.manual_seed(random_seed)
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+# import numpy as np
+# np.random.seed(random_seed)
+# import random
+# random.seed(random_seed)
+# torch.use_deterministic_algorithms(True)
 
 try:
     from torch_points import knn
@@ -109,22 +109,25 @@ class AttentionPooling(nn.Module):
 class FeatureAggregation(nn.Module):
     def __init__(self, k, in_channels, out_channels, device):
         super(FeatureAggregation, self).__init__()
+        # print(in_channels, out_channels)
         self.k = k
+        self.device = device
 
         self.lse1 = LocSE(k, out_channels//2, device)
         self.lse2 = LocSE(k, out_channels//2, device)
 
-        self.attn1 = AttentionPooling(in_channels, out_channels//2)
-        self.attn2 = AttentionPooling(in_channels, out_channels)
+        self.attn1 = AttentionPooling(out_channels, out_channels//2)
+        self.attn2 = AttentionPooling(out_channels, out_channels)
 
         self.mlp1 = SharedMLP(in_channels, out_channels//2, activation_fn=nn.LeakyReLU(0.2))
-        self.mlp2 = SharedMLP(in_channels, 2*out_channels)
+        self.mlp2 = SharedMLP(out_channels, 2*out_channels)
         self.short = SharedMLP(in_channels, 2*out_channels, batch_norm=True)
 
         self.lrelu = nn.LeakyReLU()
 
     def forward(self, coords, features):
         knn_output = knn(coords.cpu().contiguous(), coords.cpu().contiguous(), self.k)
+        knn_output = (knn_output[0].to(self.device), knn_output[1].to(self.device))
 
         x = self.mlp1(features)
 
@@ -146,19 +149,20 @@ class RanDLANet(nn.Module):
         super(RanDLANet, self).__init__()
         self.decimation = decimation
         self.d_in = d_in
-        self.start_fc = SharedMLP(d_in, 8)
+        self.start_fc = nn.Linear(d_in, 8)
         self.k = k
 
+        # Todo Mahesh : Need to understand why batch norm needs 4 dimension.
         self.bn_start = nn.Sequential(
              nn.BatchNorm2d(8, eps=1e-6, momentum=0.99),
              nn.LeakyReLU(0.2)
         )
 
-        self.enc = nn.ModuleList(
+        self.enc = nn.ModuleList([
             FeatureAggregation(k, 8, 16, device),
             FeatureAggregation(k, 32, 64, device),
             FeatureAggregation(k, 128, 128, device),
-            FeatureAggregation(k, 256, 256, device)
+            FeatureAggregation(k, 256, 256, device)]
         )
         self.mid_mlp = SharedMLP(512, 512, activation_fn=nn.ReLU())
         
@@ -168,65 +172,64 @@ class RanDLANet(nn.Module):
                 "activation_fn" : nn.ReLU()
         }
                 
-        self.dec = nn.ModuleList(
+        self.dec = nn.ModuleList([
             SharedMLP(1024, 256, **decoder_args),
             SharedMLP(512, 128, **decoder_args),
             SharedMLP(256, 32, **decoder_args),
-            SharedMLP(64, 8, **decoder_args)
+            SharedMLP(64, 8, **decoder_args)]
         )
 
-        self.last_fc1 = nn.Linear(8, 64)
-        self.last_fc2 = nn.Linear(64, 32)
-        self.last_fc3 = nn.Linear(32, num_classes)
-
+        self.last_fc1 = SharedMLP(8, 64, activation_fn=nn.ReLU(), batch_norm=True)
+        self.last_fc2 = SharedMLP(64, 32, activation_fn=nn.ReLU(), batch_norm=True)
         self.drop = nn.Dropout()
+        self.last_fc3 = SharedMLP(32, num_classes)
 
         self.device = device
         self.to(device)
 
     def forward(self, in_cloud):
-        features = in_cloud[..., 3:self.d_in].unsqueeze(-1).permute(0, 2, 1, 3)
         coords = in_cloud[..., :3]
+        # features = in_cloud[..., 3:self.d_in].unsqueeze(-1).permute(0, 2, 1, 3)
         N = in_cloud.shape[1]
         d = 1
+        decimation_ratio = self.decimation
 
-        x = self.start_fc(in_cloud)
+        x = self.start_fc(in_cloud).transpose(-2, -1).unsqueeze(-1)
         x  = self.bn_start(x)
 
         encoding_list = []
 
         for enc_layer in self.enc:
              # Todo Check the dimensions of the features and the coordinates being passed tot he enc_layer.
-            x = enc_layer(x, coords[:N//d, ...])
+            x = enc_layer(coords[:, :N//d, :], x)
             encoding_list.append(x.clone())
             d = d * self.decimation
-            x = x[:N//d, ...]
+            x = x[:, :, :N//d]
         
         x = self.mid_mlp(x)
-        d_ratio = 1
 
-        for dec_layer in self.dec:
-            i = 3
-            neighbors, _ = knn(coords[N//d, ...].cpu().contiguous(), 
-                               coords[N*d//d_ratio, ...].cpu().contiguous(), 
+        i = 3
+        for mlp in self.dec:
+            neighbors, _ = knn(coords[:, :N//d, :].cpu().contiguous(), 
+                               coords[:, :N*decimation_ratio//d, :].cpu().contiguous(), 
                                1)
             
+            # .to() is not inplace operation.
+            neighbors = neighbors.to(self.device)
             # Todo We need check what exactly these operations mean in detail specifically on the image data.
 
             # Approximate comments of whats happening : We are upsampling the end encoder ouput which is of N/256
             # size of the original point cloud. We use nearest enighbor interpolation, which finds the nearest neighbor
             # of the point in it's N*4/256 volume and copies its own feature.
-            neighbors.to(self.device)
             
-            extended_neighbors = neighbors.unsqueeze(1).exapnd(-1, x.size(1), -1, 1)
+            extended_neighbors = neighbors.unsqueeze(1).expand(-1, x.size(1), -1, 1)
             x_neighbors = torch.gather(x, -2, extended_neighbors)
             x = torch.cat((x_neighbors, encoding_list[i]), dim=1)
 
-            x = self.mlp(x)
-            dec_layer()
+            x = mlp(x)
             i-=1
 
-            d_ratio //= self.decimation
+            d //= decimation_ratio
         
         x = self.last_fc1(x)
         x = self.last_fc2(x)
@@ -241,7 +244,7 @@ if __name__ == '__main__':
     # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     d_in = 15
     # torch.manual_seed(42)
-    cloud = 1000*torch.randn(1, 2**16, d_in).to('cpu')
+    cloud = 1000*torch.randn(1, 2**16, d_in).to('cuda')
     # d = 4
     # lse = LocSE(16, d, 'cpu')
     features = cloud[..., 3:d_in].unsqueeze(-1).permute(0, 2, 1, 3)
@@ -249,6 +252,8 @@ if __name__ == '__main__':
     # ans = lse(cloud[..., :3], features)
     # attn = AttentionPooling(in_channels=2*d, out_channels=2*d)
     # ans = attn(ans)
-    f_aggr = FeatureAggregation(16, 12, 12, 'cpu')
-    out = f_aggr(coords, features)
-    print("x")
+    # f_aggr = FeatureAggregation(16, 12, 12, 'cpu')
+    # out = f_aggr(coords, features)
+    model = RanDLANet(16, d_in, 4, 18, 'cuda')
+    scores = model(cloud)
+    print('x')
