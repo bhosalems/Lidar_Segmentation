@@ -60,7 +60,7 @@ def randla_train(PATH, args):
                 pt_cloud, pt_labels = data
 
                 pt_labels = pt_labels.squeeze(-1)
-                pt_labels = pt_labels - 1
+                # pt_labels = pt_labels - 1
                 print(pt_labels.max(),pt_labels.min())
 
                 opt.zero_grad()
