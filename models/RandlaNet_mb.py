@@ -144,9 +144,9 @@ class FeatureAggregation(nn.Module):
 
         return self.lrelu(sum)
 
-class RanDLANet(nn.Module):
+class RandLANet(nn.Module):
     def __init__(self, k, d_in, decimation, num_classes, device):
-        super(RanDLANet, self).__init__()
+        super(RandLANet, self).__init__()
         self.decimation = decimation
         self.d_in = d_in
         self.start_fc = nn.Linear(d_in, 8)
@@ -254,6 +254,6 @@ if __name__ == '__main__':
     # ans = attn(ans)
     # f_aggr = FeatureAggregation(16, 12, 12, 'cpu')
     # out = f_aggr(coords, features)
-    model = RanDLANet(16, d_in, 4, 18, 'cuda')
+    model = RandLANet(16, d_in, 4, 18, 'cuda')
     scores = model(cloud)
     print('x')

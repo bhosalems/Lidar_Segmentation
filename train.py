@@ -22,20 +22,23 @@ def get_args():
     parser.add_argument('--k', type=int, help='k neighbors', default=16)
     parser.add_argument('--d_in', type=int, help='input feature dimension', default=6)
     parser.add_argument('--decimation', type=int, help='decimation value', default=4)
-    parser.add_argument('--num_classes', type=int, help='number of classes in dataset', default=18)
+    # TODO Need to change the number of classes here, just added +1 to avoid the assertion error,
+    # https://github.com/scaleapi/pandaset-devkit/issues/132
+    parser.add_argument('--num_classes', type=int, help='number of classes in dataset', default=43)
     parser.add_argument('--device', type=str, help='cpu/cuda', default='cuda')
     parser.add_argument('--epochs', type=int, help='number of train epochs', default=2)
     return parser.parse_args()
 
 def randla_train(PATH, args):
 
-    #pdset_train = get_data_loader(PATH, args.b_size, args.MX_SZ, args.n_scenes, False)
-    model = RanDLANet(args.k, args.d_in, args.decimation, args.num_classes, args.device)
+    pdset_train = get_data_loader(PATH, args.b_size, args.MX_SZ, args.n_scenes, False)
+    model = RandLANet(args.k, args.d_in, args.decimation, args.num_classes, args.device)
     epochs = args.epochs
     log_dir = args.log_dir
+    device = args.device
     opt = torch.optim.Adam(model.parameters(), lr=0.0003)
     criterion = nn.CrossEntropyLoss()  #TODO :add class weights for handling class imbalance
-
+    model.double().to(device)
 
     handlers = [logging.StreamHandler()]
     if not os.path.exists(log_dir):
@@ -49,17 +52,31 @@ def randla_train(PATH, args):
     
     with SummaryWriter(log_dir) as writer:
         for e in range(epochs):
+            logging.info(f'===========Epoch {e}/{epochs}============')
             itr_loss = AverageMeter()
+            ln = len(pdset_train)
             for idx, data in enumerate(pdset_train):
+                data = (data[0].to(device), data[1].to(device))
                 pt_cloud, pt_labels = data
-                scores = model(pt_cloud)
-                loss = criterion(scores, pt_labels)
-                itr_loss.update(loss.item())
-            writer.add_scalar(itr_loss.avg, e)
-        
-        print('x')
 
-    # return
+                pt_labels = pt_labels.squeeze(-1)
+                pt_labels = pt_labels - 1
+                print(pt_labels.max(),pt_labels.min())
+
+                opt.zero_grad()
+                scores = model(pt_cloud)
+
+                # Information on logits - https://tinyurl.com/6wp4uwwz
+                pred_label = torch.distributions.utils.probs_to_logits(scores, is_binary=False)
+                loss = criterion(pred_label, pt_labels)
+                itr_loss.update(loss.item())
+
+                logging.info(f'itreration: {idx}/{ln} loss : {loss.item()}')
+                loss.backward()
+                opt.step()
+                
+            writer.add_scalar(itr_loss.avg, e)
+            logging.info('Epoch completed : {e}/{epochs} loss : {itr_loss.avg}')
 
 
 if __name__ == "__main__":
