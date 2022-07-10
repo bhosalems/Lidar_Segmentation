@@ -1,5 +1,5 @@
-from ast import arg
 from config.config import PATH_TRAIN, PATH_VALID
+from metrics.metrics import accuracy, calc_accuracy, calc_iou
 from models.RandlaNet_mb import *
 import os
 import torch
@@ -11,6 +11,8 @@ from torch.utils.tensorboard import SummaryWriter
 from utils.utils import *
 from utils.utils import AverageMeter
 from datetime import datetime
+from metrics import *
+import numpy as np
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -34,15 +36,23 @@ def eval(model, PATH, criterion, args):
     device = args.device
     pdset_valid = get_data_loader(PATH, args.b_size, args.MX_SZ, args.n_scenes, False)
     val_itr_loss = AverageMeter()
+    val_itr_acc = AverageMeter()
+    val_itr_iou = AverageMeter()
     with torch.no_grad():
         for idx, data in enumerate(pdset_valid):
             data = (data[0].to(device), data[1].to(device))
-            valid_pts, valid_labels = data
-            valid_labels = valid_labels.squeeze(-1)
+            valid_pts, valid_gt_labels = data
+            valid_gt_labels = valid_gt_labels.squeeze(-1)
             val_scores = model(valid_pts)
-            val_loss = criterion(val_scores, valid_labels)
+            val_labels = torch.distributions.utils.probs_to_logits(val_scores, is_binary=False)
+            val_loss = criterion(val_labels, valid_gt_labels)
             val_itr_loss.update(val_loss.item())
-    return val_itr_loss
+            # TODO per_class values returned here are for last batch , add code to take average if needed
+            acc, per_class_acc  = calc_accuracy(val_labels, valid_gt_labels)
+            iou, per_class_iou = calc_iou(val_labels, valid_gt_labels)
+            val_itr_acc.update(acc)
+            val_itr_iou.update(iou)
+    return val_itr_loss, val_itr_acc, val_itr_iou, per_class_acc, per_class_iou
 
 def randla_train(PATH, args):
 
@@ -54,6 +64,7 @@ def randla_train(PATH, args):
     opt = torch.optim.Adam(model.parameters(), lr=0.0003)
     criterion = nn.CrossEntropyLoss()  #TODO :add class weights for handling class imbalance
     model.double().to(device)
+    num_classes = args.num_classes
 
     handlers = [logging.StreamHandler()]
     if not os.path.exists(log_dir):
@@ -70,6 +81,8 @@ def randla_train(PATH, args):
             logging.info(f'===========Epoch {e}/{epochs}============')
             itr_loss = AverageMeter()
             ln = len(pdset_train)
+            batch_train_acc = []
+            batch_train_iou = []
             for idx, data in enumerate(pdset_train):
                 data = (data[0].to(device), data[1].to(device))
                 pt_cloud, pt_labels = data
@@ -83,17 +96,43 @@ def randla_train(PATH, args):
 
                 # Information on logits - https://tinyurl.com/6wp4uwwz
                 pred_label = torch.distributions.utils.probs_to_logits(scores, is_binary=False)
-                loss = criterion(pred_label, pt_labels)
-                itr_loss.update(loss.item())
+                train_loss = criterion(pred_label, pt_labels)
+                batch_train_acc.append(calc_accuracy(pred_label, pt_labels))
+                batch_train_iou.append(calc_iou(pred_label, pt_labels))
 
-                logging.info(f'itreration: {idx}/{ln} loss : {loss.item()}')
-                loss.backward()
+                itr_loss.update(train_loss.item())
+
+                logging.info(f'itreration : {idx}/{ln}\t loss : {train_loss.item()}')
+                train_loss.backward()
                 opt.step()
 
-            writer.add_scalar(itr_loss.avg, e)
-            eval_loss = eval(model, PATH_VALID, criterion, args)
-            writer.add_scalar(eval_loss.avg, e)
-            logging.info(f'Epoch completed : {e}/{epochs}     Train_loss : {itr_loss.avg}    Validation_loss : {eval_loss.avg}')
+            train_accs = np.mean(np.array(batch_train_acc), axis=0)
+            train_ious = np.mean(np.array(batch_train_iou), axis=0)
+
+            writer.add_scalar("train/train_loss", itr_loss.avg, e)
+            for c in range(len(mean_acc)-1):
+                writer.add_scaler("train/mean_class_accuracy")
+
+            
+            ###
+            eval_loss, eval_accs, eval_ious = eval(model, PATH_VALID, criterion, args)
+
+            acc_dicts = [ 
+                    {   'train_acc' : train_acc,
+                        'eval_acc' : eval_acc
+                    }for train_acc, eval_acc in zip(train_accs, eval_accs)
+            ]
+
+            iou_dicts = [ 
+                    {   'train_acc' : train_iou,
+                        'eval_acc' : eval_iou
+                    }for train_iou, eval_iou in zip(train_ious, eval_ious):
+            ]
+            
+            
+
+            writer.add_scalar("train/eval_loss", eval_loss.avg, e)
+            logging.info(f'Epoch completed : {e}/{epochs}\t Train_loss : {itr_loss.avg}\t Validation_loss : {eval_loss.avg}\t Validation_accuracy : {eval_acc}\t Validation_IOU : {eval_iou}')
             
 
             if e%args.save_freq == 0:
@@ -109,6 +148,7 @@ def randla_train(PATH, args):
                 )
            
 if __name__ == "__main__":
+    logging.captureWarnings(True)
     args = get_args()
     PATH = PATH_TRAIN  
     randla_train(PATH, args)
