@@ -24,7 +24,6 @@ class PandaDataset(Dataset):
         self.type = type
 
     def __getitem__(self, idx):
-        # loading 8 scenes per sequence from train/valid dataset
         # using load_lidar to load all data for a scene , then extracting  point cloud and semseg data from it
         # return to_tensor is optional , as we are creating tensors in pandaset_collate
 
@@ -61,9 +60,18 @@ def pandaset_collate(batch, args):
     labels = []
     MX_SZ = args['MX_SZ']
     for t in batch:
-        idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
-        pt_cld.append(torch.tensor(t[0].iloc[idx].values))
-        labels.append(torch.tensor(t[1].iloc[idx].values))
+        # idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
+        # pt_cld.append(torch.tensor(t[0].iloc[idx].values))
+        # labels.append(torch.tensor(t[1].iloc[idx].values))
+
+        l = len(t[0])
+        start = 0
+        while ((l-start)//MX_SZ) > 0:
+            end = MX_SZ + start
+            assert((end - start) == MX_SZ)
+            pt_cld.append(torch.tensor(t[0].iloc[start:end].values))
+            labels.append(torch.tensor(t[1].iloc[start:end].values))
+            start = end
     f_pt_cld = torch.stack(pt_cld)
     f_labels = torch.stack(labels)
     return f_pt_cld, f_labels
@@ -72,6 +80,7 @@ def pandaset_collate(batch, args):
 # passing  pandaset_collate function to data_loader and returning data_loader object
 def get_data_loader(dir, batch, MX_SZ, num_scenes=80, to_tensor=True):
     pdset = PandaDataset(root_dir=dir, num_scenes=num_scenes, to_tensor=to_tensor)
+    start = 0
     arg = {'MX_SZ': MX_SZ}
     return DataLoader(pdset, batch_size=batch, collate_fn=lambda b: pandaset_collate(b, arg))
 

@@ -10,7 +10,7 @@ def calc_accuracy(scores, labels):
         labels (torch.tensor): Groundtruth labels pf shape (B, N)
     
     Returns:
-        tuple: (overall accuracy, [per class accuracies])
+        tuple: ([per class accuracies, overall_accuracy])
     """
     
     pred_labels = torch.argmax(scores, dim=1)
@@ -18,13 +18,14 @@ def calc_accuracy(scores, labels):
 
     a_mask = pred_labels == labels
     per_class_accuracies = []
-    for c in num_classes:
+    for c in range(num_classes):
         class_mask = pred_labels == c
         class_accuracy = (class_mask & a_mask).float().sum().cpu().item()
-        class_accuracy /= class_mask.float().sum().cpu().item()
+        class_accuracy /= (class_mask.float().sum().cpu().item() + 1e-05)
         per_class_accuracies.append(class_accuracy)
 
-    return per_class_accuracies.append(a_mask.float().mean().cpu().item())
+    per_class_accuracies.append(a_mask.float().mean().cpu().item())
+    return per_class_accuracies
 
 def calc_iou(scores, labels):
     """calculates intersection over union given predicted labels and ground truth labels
@@ -34,20 +35,22 @@ def calc_iou(scores, labels):
         labels (torch.tensor): Groundtruth labels pf shape (B, N)
 
     Returns:
-        tuple : (mean IOU , [per class IOU]) 
+        tuple : ([per class IOU, mean_IOU]) 
     """
-    pred_labels = torch.max(scores, dim=2)
+    pred_labels = torch.argmax(scores, dim=1)
     num_classes = scores.shape[-2]
+
     a_mask = pred_labels == labels
     per_class_iou = []
-    for c in num_classes:
+    for c in range(num_classes):
         class_mask = pred_labels == c
         intr = (class_mask & a_mask).float().sum().cpu().item()
         gt_mask = labels == c
         union = (class_mask | gt_mask).float().sum().cpu().item()
-        iou = intr/union
+        iou = intr/(union + 1e-05)
         per_class_iou.append(iou)
-    return per_class_iou.append(sum(per_class_iou)/len(per_class_iou))
+    per_class_iou.append(sum(per_class_iou)/len(per_class_iou))
+    return per_class_iou
         
         
 
