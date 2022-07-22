@@ -4,7 +4,9 @@ from torch.utils.data import Dataset, DataLoader
 import pandaset
 import math
 import gc
-from config.config import *
+import sys
+sys.path.append('/home/csgrad/mbhosale/Lidar_Segmentation/config')
+from config import cfg
 import random
 
 
@@ -44,9 +46,9 @@ class PandaDataset(Dataset):
         if self.to_tensor:
             self.sc_ptcloud_tensor = torch.tensor(self.sc_ptcloud.values)
             self.sc_semseg_tensor = torch.tensor(self.sc_semseg.values)
-            return self.sc_ptcloud_tensor, self.sc_semseg_tensor
+            return self.sc_ptcloud_tensor[:, :4], self.sc_semseg_tensor
         else:
-            return self.sc_ptcloud, self.sc_semseg
+            return self.sc_ptcloud.iloc[:, :4], self.sc_semseg
 
     def __len__(self):
         return self.len
@@ -60,7 +62,7 @@ def pandaset_collate(batch, args):
     labels = []
     MX_SZ = args['MX_SZ']
     for t in batch:
-        # idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
+        idx = random.sample(range(0, t[0].shape[0]), MX_SZ)
         # pt_cld.append(torch.tensor(t[0].iloc[idx].values))
         # labels.append(torch.tensor(t[1].iloc[idx].values))
 
@@ -87,8 +89,8 @@ def get_data_loader(dir, batch, MX_SZ, num_scenes=80, to_tensor=True):
 
 # data_loader creates index for input data
 if __name__ == '__main__':
-    train_dl = get_data_loader(PATH_TRAIN, 8, 16000, 80, False)
-    valid_dl = get_data_loader(PATH_VALID, 8, 16000, 80, False)
+    train_dl = get_data_loader(cfg.PATH_TRAIN, 8, 16000, 80, False)
+    valid_dl = get_data_loader(cfg.PATH_VALID, 8, 16000, 80, False)
     for i_batch, sample_batched in enumerate(train_dl):
         print(i_batch)
         print(sample_batched)

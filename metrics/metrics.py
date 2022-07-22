@@ -13,9 +13,10 @@ def calc_accuracy(scores, labels):
         tuple: ([per class accuracies, overall_accuracy])
     """
     
-    pred_labels = torch.argmax(scores, dim=1)
+    pred_labels = torch.argmax(scores.detach(), dim=1)
     num_classes = scores.shape[-2]
 
+    labels = labels.detach()
     a_mask = pred_labels == labels
     per_class_accuracies = []
     for c in range(num_classes):
@@ -37,9 +38,10 @@ def calc_iou(scores, labels):
     Returns:
         tuple : ([per class IOU, mean_IOU]) 
     """
-    pred_labels = torch.argmax(scores, dim=1)
+    pred_labels = torch.argmax(scores.detach(), dim=1)
     num_classes = scores.shape[-2]
 
+    labels = labels.detach()
     a_mask = pred_labels == labels
     per_class_iou = []
     for c in range(num_classes):

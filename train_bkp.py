@@ -1,4 +1,4 @@
-from config.config import PATH_TRAIN, PATH_VALID
+from config.config import cfg
 from metrics.metrics import calc_accuracy, calc_iou
 from models.RandlaNet_mb import *
 import os
@@ -22,7 +22,7 @@ def get_args():
     parser.add_argument('--n_scenes', type=int, help='number of images per sequence', default=80)
     parser.add_argument('--log_dir', type=str, help='path to log file', default='logs/')
     parser.add_argument('--k', type=int, help='k neighbors', default=16)
-    parser.add_argument('--d_in', type=int, help='input feature dimension', default=6)
+    parser.add_argument('--d_in', type=int, help='input feature dimension', default=4)
     parser.add_argument('--decimation', type=int, help='decimation value', default=4)
     # TODO Need to change the number of classes here, just added +1 to avoid the assertion error,
     # https://github.com/scaleapi/pandaset-devkit/issues/132
@@ -31,6 +31,7 @@ def get_args():
     parser.add_argument('--epochs', type=int, help='number of train epochs', default=20)
     parser.add_argument('--save_freq', type =int, help='save frequency for model', default=5)
     parser.add_argument('--print_freq', type=int, help='print frequency of loss/other info', default=5)
+    parser.add_argument('--scheduler_gamma', type=float, help='gamma of the learning rate scheduler',default=0.95)
     return parser.parse_args()
 
 def eval(model, PATH, criterion, args):
@@ -61,6 +62,7 @@ def randla_train(PATH, args):
     log_dir = args.log_dir
     device = args.device
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, args.scheduler_gamma)
     criterion = nn.CrossEntropyLoss()  #TODO :add class weights for handling class imbalance
     model.double().to(device)
     num_classes = args.num_classes
@@ -106,6 +108,8 @@ def randla_train(PATH, args):
                 # Information on logits - https://tinyurl.com/6wp4uwwz
                 pred_label = torch.distributions.utils.probs_to_logits(scores, is_binary=False)
                 train_loss = criterion(pred_label, pt_labels)
+
+                # Mahesh : Q. Do we need to detach the tensors while calculating accuracies and IOUs?
                 batch_train_acc.append(calc_accuracy(pred_label, pt_labels))
                 batch_train_iou.append(calc_iou(pred_label, pt_labels))
 
@@ -139,18 +143,20 @@ def randla_train(PATH, args):
                             data_time=data_time,
                             eta=eta_str,
                             losses=train_loss,
-                            lr=0.001
+                            lr=scheduler.get_lr()[0]
                         )
                     )
                 end = time.time()
-
+                
+            scheduler.step()
+            
             train_accs = np.mean(np.array(batch_train_acc), axis=0)
             train_ious = np.mean(np.array(batch_train_iou), axis=0)
 
             writer.add_scalar("train/train_loss", itr_loss.avg, e)
             
             ###Evaluation
-            eval_loss, eval_accs, eval_ious = eval(model, PATH_VALID, criterion, args)
+            eval_loss, eval_accs, eval_ious = eval(model, cfg.PATH_VALID, criterion, args)
             eval_ious = np.mean(np.array(eval_ious), axis=0)
             eval_accs = np.mean(np.array(eval_accs), axis=0)
 
@@ -169,7 +175,7 @@ def randla_train(PATH, args):
             
 
             writer.add_scalar("train/eval_loss", eval_loss.avg, e)
-            logging.info(f'Epoch completed : {e}/{epochs} Train_loss : {itr_loss.avg} Validation_loss : {eval_loss.avg} Validation_accuracy : {eval_accs[-1]} Validation_IOU : {eval_ious[-1]}')
+            logging.info(f'Epoch completed : {e}/{epochs} Train_loss : {itr_loss.avg} Train_accuracy : {train_accs[-1]} Train_IOU : {train_ious[-1]} Validation_loss : {eval_loss.avg} Validation_accuracy : {eval_accs[-1]} Validation_IOU : {eval_ious[-1]}')
             
             # writer syntax : https://pytorch.org/docs/stable/tensorboard.html
             for c in range(len(train_accs)-1):
@@ -193,5 +199,5 @@ def randla_train(PATH, args):
 if __name__ == "__main__":
     logging.captureWarnings(True)
     args = get_args()
-    PATH = PATH_TRAIN  
+    PATH = cfg.PATH_TRAIN  
     randla_train(PATH, args)
