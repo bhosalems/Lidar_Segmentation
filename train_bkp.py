@@ -1,11 +1,12 @@
 from config.config import cfg
+# from metrics.metrics import accuracy, intersection_over_union
 from metrics.metrics import calc_accuracy, calc_iou
 from models.RandlaNet_mb import *
 import os
 import torch
 import logging
 import argparse
-from data.dataset import get_data_loader
+from data.data import data_loaders 
 from config.config import *
 from torch.utils.tensorboard import SummaryWriter
 from utils.utils import *
@@ -14,6 +15,8 @@ from datetime import datetime, timedelta
 import time
 from metrics import *
 import numpy as np
+import pathlib
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -28,21 +31,21 @@ def get_args():
     # https://github.com/scaleapi/pandaset-devkit/issues/132
     parser.add_argument('--num_classes', type=int, help='number of classes in dataset', default=43)
     parser.add_argument('--device', type=str, help='cpu/cuda', default='cuda')
-    parser.add_argument('--epochs', type=int, help='number of train epochs', default=20)
+    parser.add_argument('--epochs', type=int, help='number of train epochs', default=200)
     parser.add_argument('--save_freq', type =int, help='save frequency for model', default=5)
     parser.add_argument('--print_freq', type=int, help='print frequency of loss/other info', default=5)
     parser.add_argument('--scheduler_gamma', type=float, help='gamma of the learning rate scheduler',default=0.95)
+    parser.add_argument('--gpu', type=int, help='GPU device', default = 2)
     return parser.parse_args()
 
-def eval(model, PATH, criterion, args):
+def eval(model, pdset_val, criterion, args):
     model.eval()
     device = args.device
-    pdset_valid = get_data_loader(PATH, args.b_size, args.MX_SZ, args.n_scenes, False)
     val_itr_loss = AverageMeter()
     per_class_accs = []
     per_class_ious = []
     with torch.no_grad():
-        for idx, data in enumerate(pdset_valid):
+        for idx, data in enumerate(pdset_val):
             data = (data[0].to(device), data[1].to(device))
             valid_pts, valid_gt_labels = data
             valid_gt_labels = valid_gt_labels.squeeze(-1)
@@ -55,22 +58,29 @@ def eval(model, PATH, criterion, args):
     return val_itr_loss, per_class_accs, per_class_ious
 
 def randla_train(PATH, args):
-
-    pdset_train = get_data_loader(PATH, args.b_size, args.MX_SZ, args.n_scenes, False)
+    torch.cuda.set_device(args.gpu)
+    pdset_train, pdset_val = data_loaders(pathlib.Path(PATH), sampling_method='active_learning')
     model = RandLANet(args.k, args.d_in, args.decimation, args.num_classes, args.device)
     epochs = args.epochs
     log_dir = args.log_dir
     device = args.device
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, args.scheduler_gamma)
-    criterion = nn.CrossEntropyLoss()  #TODO :add class weights for handling class imbalance
-    model.double().to(device)
+    criterion = nn.CrossEntropyLoss(reduction='mean', weight=torch.tensor(cfg.class_weights, device=args.device))  #TODO :add class weights for handling class imbalance
+    model.to(device)
     num_classes = args.num_classes
-
     handlers = [logging.StreamHandler()]
+    # create a separate folder to store per class values for tensorboard (tb)
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
-    log_file = os.path.join(log_dir, 'logs_'+str(datetime.now().strftime("%m%d%y_%H%M%S")))
+        
+    train_log_dir = os.path.join(log_dir, 'run_'+str(datetime.now().strftime("%m%d%y_%H%M%S")))
+    os.mkdir(train_log_dir)
+    tb = train_log_dir + "/tb"
+    tr_saved_models = train_log_dir + "/saved_models"
+    os.mkdir(tb)
+    os.mkdir(tr_saved_models)
+    log_file = os.path.join(train_log_dir, 'logs_file')
     open(log_file, 'w')
     handlers.append(logging.FileHandler(log_file, mode='a'))
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=handlers)
@@ -81,10 +91,10 @@ def randla_train(PATH, args):
 
     num_batches = len(pdset_train)
     
-    with SummaryWriter(log_dir) as writer:
+    with SummaryWriter(tb) as writer:
         model.train()
         for e in range(epochs):
-            logging.info(f'===========Epoch {e}/{epochs}============')
+            logging.info(f'===========Epoch {e+1}/{epochs}============')
             itr_loss = AverageMeter()
             ln = len(pdset_train)
             batch_train_acc = []
@@ -109,7 +119,8 @@ def randla_train(PATH, args):
                 pred_label = torch.distributions.utils.probs_to_logits(scores, is_binary=False)
                 train_loss = criterion(pred_label, pt_labels)
 
-                # Mahesh : Q. Do we need to detach the tensors while calculating accuracies and IOUs?
+                # Mahesh : Q. Do we need to detach the tensors while calculating accuracies and IOUs? >> We did it inside 
+                # the functions.
                 batch_train_acc.append(calc_accuracy(pred_label, pt_labels))
                 batch_train_iou.append(calc_iou(pred_label, pt_labels))
 
@@ -128,7 +139,7 @@ def randla_train(PATH, args):
                     ) * num_batches
                     eta_seconds = batch_time.avg * (nb_this_epoch+nb_future_epochs)
                     eta_str = str(timedelta(seconds=int(eta_seconds)))
-                    print(
+                    logging.info(
                         'epoch: [{0}/{1}][{2}/{3}]\t'
                         'time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                         'data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -143,7 +154,7 @@ def randla_train(PATH, args):
                             data_time=data_time,
                             eta=eta_str,
                             losses=train_loss,
-                            lr=scheduler.get_lr()[0]
+                            lr=scheduler.get_last_lr()[0]
                         )
                     )
                 end = time.time()
@@ -156,7 +167,7 @@ def randla_train(PATH, args):
             writer.add_scalar("train/train_loss", itr_loss.avg, e)
             
             ###Evaluation
-            eval_loss, eval_accs, eval_ious = eval(model, cfg.PATH_VALID, criterion, args)
+            eval_loss, eval_accs, eval_ious = eval(model, pdset_val, criterion, args)
             eval_ious = np.mean(np.array(eval_ious), axis=0)
             eval_accs = np.mean(np.array(eval_accs), axis=0)
 
@@ -193,11 +204,11 @@ def randla_train(PATH, args):
                         'train' : itr_loss.avg,
                         'valid_loss' : eval_loss.avg
                     }},
-                    f'{log_dir}/saved_models/model_{e}_{str(datetime.now().strftime("%m%d%y_%H%M%S"))}'
+                    f'{tr_saved_models}/model_{e}_{str(datetime.now().strftime("%m%d%y_%H%M%S"))}'
                 )
            
 if __name__ == "__main__":
     logging.captureWarnings(True)
     args = get_args()
-    PATH = cfg.PATH_TRAIN  
+    PATH = cfg.PATH  
     randla_train(PATH, args)

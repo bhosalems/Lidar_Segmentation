@@ -1,5 +1,6 @@
 import pickle, time, warnings
 import numpy as np
+#import logging
 
 import torch
 from torch.utils.data import Dataset, IterableDataset, DataLoader, Sampler, BatchSampler
@@ -84,8 +85,6 @@ class CloudsDataset(Dataset):
 
     def load_data(self):
         for i, file_path in enumerate(self.paths):
-            if i == 30:
-                break
             t0 = time.time()
             cloud_name = file_path.stem
             # if self.val_split in cloud_name:
@@ -117,21 +116,22 @@ class CloudsDataset(Dataset):
 
         print('\nPreparing reprojected indices for testing')
 
-        # Get validation and test reprojected indices
-        if self.cloud_split == 'validation':
-            for i, file_path in enumerate(self.paths):
-                t0 = time.time()
-                cloud_name = file_path.stem
+        # Mahesh : Appears it is not being used, so commented as it is giving us the error.
+        # # Get validation and test reprojected indices
+        # if self.cloud_split == 'validation':
+        #     for i, file_path in enumerate(self.paths):
+        #         t0 = time.time()
+        #         cloud_name = file_path.stem
 
-                # Validation projection and labels
-                if self.val_split in cloud_name:
-                    proj_file = self.path / '{:s}_proj.pkl'.format(cloud_name)
-                    with open(proj_file, 'rb') as f:
-                        proj_idx, labels = pickle.load(f)
+        #         # Validation projection and labels
+        #         if self.val_split in cloud_name:
+        #             proj_file = self.path / '{:s}_proj.pkl'.format(cloud_name)
+        #             with open(proj_file, 'rb') as f:
+        #                 proj_idx, labels = pickle.load(f)
 
-                    self.val_proj += [proj_idx]
-                    self.val_labels += [labels]
-                    print('{:s} done in {:.1f}s'.format(cloud_name, time.time() - t0))
+        #             self.val_proj += [proj_idx]
+        #             self.val_labels += [labels]
+        #             print('{:s} done in {:.1f}s'.format(cloud_name, time.time() - t0))
 
     def __getitem__(self, idx):
         pass
@@ -168,8 +168,22 @@ class ActiveLearningSampler(IterableDataset):
         return self.spatially_regular_gen()
 
     def __len__(self):
-        return self.n_samples # not equal to the actual size of the dataset, but enable nice progress bars
+        return self.dataset.size # not equal to the actual size of the dataset, but enable nice progress bars
 
+    # Mahesh : Below method tries to firstly randomly select the point cloud and the select randoly the point in that 
+    # point cloud (look at the logic of possibility and minpossibility that are used for finding random point cloud and
+    # min point in that point cloud respectively). These points are actually the points fromed by the KD tree on the subsampled
+    # points of the original point cloud (subsampled points are actually the centre points of the grid in 3d case), these 
+    # subsampled points are calculated from the grid sampling done by the GRID subsampling (method = barycenter 
+    # for points and features, is this density aware method of subsampling?). Once the random centre point is foound, query
+    # is performed on the KD tree of the centre point to get the nearest fg.num_points(currently set to ~80000) number of points. 
+    # KDtree is formed in first place beacause it is used to fastly query the nearest points and get the distances, once it is
+    # stored in a pickle file (of type sklearn object?) you dont have too rebuild it again and again you could directly use
+    # and saves a time than calculating the nearest nabours naively each time. At the end based on the distances the possibilities
+    # and min possibilities are updated (increased) for the points which are selected in the current iteration so as to give the 
+    # chance to new points in the next iteration (reminder these possibilities and min possibilities are used for random selection of both
+    # point cloud and point index in that point cloud.) These approximates to give equal chance to all subsampled points, and
+    # grid sampling (subsample.py) handles the sampling based on density.
     def spatially_regular_gen(self):
         # Choosing the least known point as center of a new cloud each time.
 
@@ -240,17 +254,16 @@ class ActiveLearningSampler(IterableDataset):
 
 def data_loaders(dir, sampling_method='active_learning', **kwargs):
     if sampling_method == 'active_learning':
-        dataset = CloudsDataset(dir / 'train')
-        batch_size = kwargs.get('batch_size', 6)
+        train_dataset = CloudsDataset(dir / 'train', cloud_split='training')
+        val_dataset = CloudsDataset(dir / 'valid', cloud_split='validation')
+        batch_size = kwargs.get('b_size', 8)
         val_sampler = ActiveLearningSampler(
-            dataset,
+            val_dataset,
             batch_size=batch_size,
-            split='validation'
         )
         train_sampler = ActiveLearningSampler(
-            dataset,
+            train_dataset,
             batch_size=batch_size,
-            split='training'
         )
         return DataLoader(train_sampler, **kwargs), DataLoader(val_sampler, **kwargs)
 
